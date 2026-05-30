@@ -1,11 +1,10 @@
 """
-Шаблон: PySide6 + PostgreSQL
-Авторизация / Регистрация / Панель администратора
+PySide6 + PostgreSQL
+Авторизация / Регистрация / Панель администратора / Панель пользователя
 """
 
 import sys
 import hashlib
-from datetime import datetime
 
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -18,20 +17,112 @@ from PySide6.QtCore import Qt, Signal
 import psycopg2
 import psycopg2.extras
 
-# ─── ПАРАМЕТРЫ БД (менять здесь) ────────────────────────
+# ════════════════════════════════════════════════════════
+#  ПАРАМЕТРЫ БД — меняй здесь
+# ════════════════════════════════════════════════════════
 DB_HOST     = "localhost"
 DB_PORT     = 5432
 DB_NAME     = "postgres"
 DB_USER     = "postgres"
 DB_PASSWORD = "1111"
 
-ROLE_ADMIN   = "admin"
-ROLE_USER    = "client"
-ROLE_GUEST   = "guest"          # роль гостя
+ROLE_ADMIN = "admin"
+ROLE_USER  = "client"
+ROLE_GUEST = "guest"
+
+# ────────────────────────────────────────────────────────
+# Таблицы видимые гостю (только чтение)
+GUEST_VISIBLE_TABLES = ["items", "categories"]
+
+# Таблицы видимые обычному пользователю (только чтение)
+# Добавляй/убирай названия таблиц по своему желанию
+USER_VISIBLE_TABLES = ["items", "categories", "orders", "order_items"]
 # ────────────────────────────────────────────────────────
 
-# Таблицы которые гость может смотреть (только чтение)
-GUEST_VISIBLE_TABLES = ["products", "growing_conditions", "product_condition_link"]
+
+# ════════════════════════════════════════════════════════
+#  ЦВЕТОВАЯ ПАЛИТРА — меняй здесь
+#  Просто замени hex-коды на свои цвета
+# ════════════════════════════════════════════════════════
+# Основной тёмный фон
+COLOR_BG_MAIN    = "#1a1a2e"
+# Фон боковой панели и полей ввода
+COLOR_BG_SIDEBAR = "#16213e"
+# Цвет границ/разделителей
+COLOR_BORDER     = "#0f3460"
+# Акцентный цвет (кнопки, подсветка, активный пункт меню)
+COLOR_ACCENT     = "#e94560"
+# Акцентный затемнённый (hover кнопок)
+COLOR_ACCENT_DARK = "#c73652"
+# Основной текст
+COLOR_TEXT       = "#e0e0e0"
+# Приглушённый текст (подсказки, мета-info)
+COLOR_TEXT_DIM   = "#888"
+# Цвет кнопки удаления
+COLOR_DANGER     = "#b71c1c"
+COLOR_DANGER_HOVER = "#d32f2f"
+# ════════════════════════════════════════════════════════
+
+
+def make_style():
+    """Генерирует CSS-стиль из цветовых констант выше."""
+    return f"""
+QWidget          {{ background:{COLOR_BG_MAIN}; color:{COLOR_TEXT}; font:13px 'Segoe UI',sans-serif; }}
+QFrame#sidebar   {{ background:{COLOR_BG_SIDEBAR}; border-right:1px solid {COLOR_BORDER}; }}
+QTabWidget::pane {{ border:1px solid {COLOR_BORDER}; background:{COLOR_BG_MAIN}; border-radius:4px; }}
+QTabBar::tab     {{ background:{COLOR_BG_SIDEBAR}; color:{COLOR_TEXT_DIM}; padding:9px 18px;
+                   border:1px solid {COLOR_BORDER}; border-bottom:none; border-radius:4px 4px 0 0; margin-right:2px; }}
+QTabBar::tab:selected {{ color:{COLOR_ACCENT}; border-bottom:2px solid {COLOR_ACCENT}; background:{COLOR_BG_MAIN}; }}
+QLineEdit, QSpinBox, QDoubleSpinBox, QTextEdit, QComboBox {{
+    background:{COLOR_BG_SIDEBAR}; color:{COLOR_TEXT}; border:1px solid {COLOR_BORDER};
+    border-radius:5px; padding:7px 10px; }}
+QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QTextEdit:focus {{
+    border:1px solid {COLOR_ACCENT}; }}
+QPushButton#primary {{
+    background:{COLOR_ACCENT}; color:#fff; border:none;
+    padding:9px 22px; border-radius:5px; font-weight:bold; }}
+QPushButton#primary:hover   {{ background:{COLOR_ACCENT_DARK}; }}
+QPushButton#secondary {{
+    background:{COLOR_BG_SIDEBAR}; color:{COLOR_TEXT}; border:1px solid {COLOR_BORDER};
+    padding:8px 16px; border-radius:5px; }}
+QPushButton#secondary:hover {{ background:{COLOR_BORDER}; }}
+QPushButton#danger {{
+    background:{COLOR_DANGER}; color:#fff; border:none;
+    padding:8px 16px; border-radius:5px; font-weight:bold; }}
+QPushButton#danger:hover {{ background:{COLOR_DANGER_HOVER}; }}
+QPushButton#nav {{
+    background:transparent; color:{COLOR_TEXT_DIM}; border:none;
+    text-align:left; padding:11px 18px; border-radius:0; }}
+QPushButton#nav:hover   {{ background:{COLOR_BORDER}; color:{COLOR_TEXT}; }}
+QPushButton#nav:checked {{ background:{COLOR_BORDER}; color:{COLOR_ACCENT}; border-left:3px solid {COLOR_ACCENT}; }}
+QPushButton#guest {{
+    background:transparent; color:{COLOR_TEXT_DIM}; border:1px solid {COLOR_BORDER};
+    padding:8px 16px; border-radius:5px; }}
+QPushButton#guest:hover {{ background:{COLOR_BORDER}; color:{COLOR_TEXT}; }}
+QTableWidget {{ background:{COLOR_BG_SIDEBAR}; gridline-color:{COLOR_BORDER}; border:none;
+               alternate-background-color:{COLOR_BG_MAIN}; selection-background-color:{COLOR_BORDER}; }}
+QTableWidget::item {{ padding:5px 8px; }}
+QHeaderView::section {{ background:{COLOR_BORDER}; color:{COLOR_TEXT_DIM}; padding:7px 8px;
+                        border:none; border-bottom:1px solid {COLOR_ACCENT}; font-weight:bold; font-size:12px; }}
+QScrollBar:vertical   {{ background:{COLOR_BG_SIDEBAR}; width:7px; }}
+QScrollBar::handle:vertical {{ background:{COLOR_BORDER}; border-radius:3px; min-height:20px; }}
+QScrollBar:horizontal {{ background:{COLOR_BG_SIDEBAR}; height:7px; }}
+QScrollBar::handle:horizontal {{ background:{COLOR_BORDER}; border-radius:3px; }}
+QMessageBox {{ background:{COLOR_BG_MAIN}; }}
+QMessageBox QPushButton {{ background:{COLOR_ACCENT}; color:#fff; border:none;
+    padding:7px 18px; border-radius:4px; font-weight:bold; min-width:70px; }}
+QDialog {{ background:{COLOR_BG_MAIN}; }}
+QLabel#title {{ font-size:18px; font-weight:bold; color:{COLOR_TEXT}; padding-bottom:4px; }}
+QLabel#sub   {{ font-size:11px; color:{COLOR_TEXT_DIM}; padding-bottom:14px; }}
+QLabel#dim   {{ font-size:12px; color:{COLOR_TEXT_DIM}; }}
+QLabel#guest_badge {{ font-size:11px; color:{COLOR_ACCENT}; background:{COLOR_BORDER};
+                     padding:3px 10px; border-radius:10px; }}
+QLabel#user_badge {{ font-size:11px; color:#4caf50; background:{COLOR_BORDER};
+                     padding:3px 10px; border-radius:10px; }}
+"""
+
+
+STYLE = make_style()
 
 
 # ════════════════════════════════════════════════════════
@@ -89,69 +180,12 @@ class DB:
     def register(cls, login, pw, full_name, phone=""):
         role = cls.q("SELECT id FROM roles WHERE role_name=%s", (ROLE_USER,), fetch="one")
         if not role:
-            raise ValueError(f"Роль '{ROLE_USER}' не найдена")
+            raise ValueError(f"Роль '{ROLE_USER}' не найдена в БД")
         cls.q(
             "INSERT INTO users (login,password_hash,role_id,full_name,phone) "
             "VALUES (%s,%s,%s,%s,%s)",
             (login, cls.hash(pw), role["id"], full_name, phone)
         )
-
-
-# ════════════════════════════════════════════════════════
-#  СТИЛЬ
-# ════════════════════════════════════════════════════════
-STYLE = """
-QWidget          { background:#1a1a2e; color:#e0e0e0; font:13px 'Segoe UI',sans-serif; }
-QFrame#sidebar   { background:#16213e; border-right:1px solid #0f3460; }
-QTabWidget::pane { border:1px solid #0f3460; background:#1a1a2e; border-radius:4px; }
-QTabBar::tab     { background:#16213e; color:#888; padding:9px 18px;
-                   border:1px solid #0f3460; border-bottom:none; border-radius:4px 4px 0 0; margin-right:2px; }
-QTabBar::tab:selected { color:#e94560; border-bottom:2px solid #e94560; background:#1a1a2e; }
-QLineEdit, QSpinBox, QDoubleSpinBox, QTextEdit, QComboBox {
-    background:#16213e; color:#e0e0e0; border:1px solid #0f3460;
-    border-radius:5px; padding:7px 10px; }
-QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QTextEdit:focus {
-    border:1px solid #e94560; }
-QPushButton#primary {
-    background:#e94560; color:#fff; border:none;
-    padding:9px 22px; border-radius:5px; font-weight:bold; }
-QPushButton#primary:hover   { background:#c73652; }
-QPushButton#secondary {
-    background:#16213e; color:#e0e0e0; border:1px solid #0f3460;
-    padding:8px 16px; border-radius:5px; }
-QPushButton#secondary:hover { background:#0f3460; }
-QPushButton#danger {
-    background:#b71c1c; color:#fff; border:none;
-    padding:8px 16px; border-radius:5px; font-weight:bold; }
-QPushButton#danger:hover { background:#d32f2f; }
-QPushButton#nav {
-    background:transparent; color:#aaa; border:none;
-    text-align:left; padding:11px 18px; border-radius:0; }
-QPushButton#nav:hover   { background:#0f3460; color:#e0e0e0; }
-QPushButton#nav:checked { background:#0f3460; color:#e94560; border-left:3px solid #e94560; }
-QPushButton#guest {
-    background:transparent; color:#888; border:1px solid #0f3460;
-    padding:8px 16px; border-radius:5px; }
-QPushButton#guest:hover { background:#0f3460; color:#e0e0e0; }
-QTableWidget { background:#16213e; gridline-color:#0f3460; border:none;
-               alternate-background-color:#1a1a2e; selection-background-color:#0f3460; }
-QTableWidget::item { padding:5px 8px; }
-QHeaderView::section { background:#0f3460; color:#aaa; padding:7px 8px;
-                        border:none; border-bottom:1px solid #e94560; font-weight:bold; font-size:12px; }
-QScrollBar:vertical   { background:#16213e; width:7px; }
-QScrollBar::handle:vertical { background:#0f3460; border-radius:3px; min-height:20px; }
-QScrollBar:horizontal { background:#16213e; height:7px; }
-QScrollBar::handle:horizontal { background:#0f3460; border-radius:3px; }
-QMessageBox { background:#1a1a2e; }
-QMessageBox QPushButton { background:#e94560; color:#fff; border:none;
-    padding:7px 18px; border-radius:4px; font-weight:bold; min-width:70px; }
-QDialog { background:#1a1a2e; }
-QLabel#title { font-size:18px; font-weight:bold; color:#e0e0e0; padding-bottom:4px; }
-QLabel#sub   { font-size:11px; color:#888; padding-bottom:14px; }
-QLabel#dim   { font-size:12px; color:#888; }
-QLabel#guest_badge { font-size:11px; color:#e94560; background:#0f3460;
-                     padding:3px 10px; border-radius:10px; }
-"""
 
 
 # ════════════════════════════════════════════════════════
@@ -178,11 +212,8 @@ class AuthWindow(QMainWindow):
         self.tabs.addTab(self._tab_register(), "  Регистрация  ")
         bl.addWidget(self.tabs)
 
-        # ── Кнопка гостя ──────────────────────────────────────────
-        # Удали этот блок если гостевой вход не нужен (от # GUEST_START до # GUEST_END)
-        # GUEST_START
         sep = QFrame(); sep.setFixedHeight(1)
-        sep.setStyleSheet("background:#0f3460; margin:8px 0;")
+        sep.setStyleSheet(f"background:{COLOR_BORDER}; margin:8px 0;")
         bl.addWidget(sep)
 
         guest_btn = QPushButton("👁  Войти как гость  (только просмотр)")
@@ -190,12 +221,9 @@ class AuthWindow(QMainWindow):
         guest_btn.setFixedHeight(38)
         guest_btn.clicked.connect(self._login_guest)
         bl.addWidget(guest_btn)
-        # GUEST_END
-        # ──────────────────────────────────────────────────────────
 
         lay.addWidget(box)
 
-    # ── Вход ─────────────────────────────────
     def _tab_login(self):
         w = QWidget(); l = QVBoxLayout(w); l.setSpacing(8); l.setContentsMargins(20,20,20,20)
         l.addWidget(self._lbl("Логин"))
@@ -213,7 +241,6 @@ class AuthWindow(QMainWindow):
         self.lbl_err.setWordWrap(True); l.addWidget(self.lbl_err)
         return w
 
-    # ── Регистрация ───────────────────────────
     def _tab_register(self):
         w = QWidget(); l = QVBoxLayout(w); l.setSpacing(7); l.setContentsMargins(20,18,20,18)
         specs = [("Полное имя *","e_r_name",False,"Иван Иванов"),
@@ -236,7 +263,7 @@ class AuthWindow(QMainWindow):
         l = QLabel(t); l.setObjectName("dim"); return l
 
     def _status(self, lbl, text, ok=False):
-        lbl.setStyleSheet(f"color:{'#4caf50' if ok else '#e94560'};")
+        lbl.setStyleSheet(f"color:{'#4caf50' if ok else COLOR_ACCENT};")
         lbl.setText(text)
 
     def _login(self):
@@ -254,16 +281,11 @@ class AuthWindow(QMainWindow):
         except Exception as e:
             self._status(self.lbl_err, f"✗ {e}")
 
-    # GUEST_START
     def _login_guest(self):
-        guest_user = {
-            "id": None,
-            "login": "guest",
-            "full_name": "Гость",
-            "role_name": ROLE_GUEST,
-        }
-        self.logged_in.emit(guest_user)
-    # GUEST_END
+        self.logged_in.emit({
+            "id": None, "login": "guest",
+            "full_name": "Гость", "role_name": ROLE_GUEST,
+        })
 
     def _register(self):
         name  = self.e_r_name.text().strip()
@@ -292,7 +314,7 @@ class AuthWindow(QMainWindow):
 
 
 # ════════════════════════════════════════════════════════
-#  ДИАЛОГ ДОБАВЛЕНИЯ / РЕДАКТИРОВАНИЯ СТРОКИ
+#  ДИАЛОГ ДОБАВЛЕНИЯ / РЕДАКТИРОВАНИЯ СТРОКИ (только для админа)
 # ════════════════════════════════════════════════════════
 class RowDialog(QDialog):
     def __init__(self, table, columns, existing=None, parent=None):
@@ -366,10 +388,9 @@ class RowDialog(QDialog):
 
 
 # ════════════════════════════════════════════════════════
-#  ПРОСМОТР ТАБЛИЦЫ (только чтение — для гостя)
+#  ПРОСМОТР ТАБЛИЦЫ — только чтение (гость и пользователь)
 # ════════════════════════════════════════════════════════
 class TableViewer(QWidget):
-    """Только чтение — без кнопок редактирования."""
     def __init__(self, table):
         super().__init__()
         self.table = table; self.columns = []; self.data = []
@@ -427,7 +448,7 @@ class TableViewer(QWidget):
 
 
 # ════════════════════════════════════════════════════════
-#  РЕДАКТОР ТАБЛИЦЫ (для админа)
+#  РЕДАКТОР ТАБЛИЦЫ — полный CRUD (только для админа)
 # ════════════════════════════════════════════════════════
 class TableEditor(QWidget):
     def __init__(self, table):
@@ -515,41 +536,54 @@ class TableEditor(QWidget):
 
 
 # ════════════════════════════════════════════════════════
-#  ПАНЕЛЬ АДМИНИСТРАТОРА
+#  БАЗОВОЕ ОКНО С БОКОВОЙ ПАНЕЛЬЮ
+#  Родительский класс для AdminWindow, UserWindow, GuestWindow
 # ════════════════════════════════════════════════════════
-class AdminWindow(QMainWindow):
+class BaseWindow(QMainWindow):
     logout = Signal()
 
-    def __init__(self, user):
+    # title      — заголовок окна
+    # user       — словарь с данными пользователя
+    # tables     — список таблиц для показа в сайдбаре
+    # editor     — True = TableEditor (CRUD), False = TableViewer (только чтение)
+    # badge_text — текст бейджика под заголовком (None = не показывать)
+    # badge_obj  — objectName для стиля бейджика
+    def __init__(self, title, user, tables, editor=False, badge_text=None, badge_obj="guest_badge"):
         super().__init__()
         self.user = user
-        self.setWindowTitle("Панель администратора")
-        self.resize(1100, 680); self.setStyleSheet(STYLE)
-        self._build()
+        self._tables = tables
+        self._use_editor = editor
+        self.setWindowTitle(title)
+        self.resize(1100, 680)
+        self.setStyleSheet(STYLE)
+        self._build(badge_text, badge_obj)
 
-    def _build(self):
+    def _build(self, badge_text, badge_obj):
         root = QWidget(); self.setCentralWidget(root)
         lay = QHBoxLayout(root); lay.setContentsMargins(0,0,0,0); lay.setSpacing(0)
 
+        # ── Sidebar ───────────────────────────────────────
         sb = QFrame(); sb.setObjectName("sidebar"); sb.setFixedWidth(200)
         sl = QVBoxLayout(sb); sl.setContentsMargins(0,0,0,0); sl.setSpacing(0)
 
-        header = QLabel("  Панель управления")
-        header.setStyleSheet("color:#e94560;font-size:14px;font-weight:bold;padding:18px 0 6px 0;")
+        header = QLabel("  Панель управления" if self._use_editor else "  Каталог")
+        header.setStyleSheet(f"color:{COLOR_ACCENT};font-size:14px;font-weight:bold;padding:18px 0 6px 0;")
         sl.addWidget(header)
 
-        sep = QFrame(); sep.setFixedHeight(1); sep.setStyleSheet("background:#0f3460;")
+        if badge_text:
+            badge_wrap = QWidget()
+            bw = QHBoxLayout(badge_wrap); bw.setContentsMargins(10,0,10,8)
+            badge = QLabel(badge_text); badge.setObjectName(badge_obj)
+            bw.addWidget(badge)
+            sl.addWidget(badge_wrap)
+
+        sep = QFrame(); sep.setFixedHeight(1); sep.setStyleSheet(f"background:{COLOR_BORDER};")
         sl.addWidget(sep)
 
         self.stack = QStackedWidget()
         self._btns = []
 
-        try:
-            tables = DB.tables()
-        except Exception:
-            tables = []
-
-        for i, tbl in enumerate(tables):
+        for i, tbl in enumerate(self._tables):
             btn = QPushButton(f"  {tbl}")
             btn.setObjectName("nav"); btn.setCheckable(True); btn.setFixedHeight(40)
             btn.clicked.connect(lambda _, idx=i, t=tbl: self._switch(idx, t))
@@ -557,29 +591,32 @@ class AdminWindow(QMainWindow):
             self.stack.addWidget(QWidget())
 
         sl.addStretch()
-        sep2 = QFrame(); sep2.setFixedHeight(1); sep2.setStyleSheet("background:#0f3460;")
+
+        sep2 = QFrame(); sep2.setFixedHeight(1); sep2.setStyleSheet(f"background:{COLOR_BORDER};")
         sl.addWidget(sep2)
 
         info = QLabel(f"  {self.user.get('full_name','')}\n  {self.user.get('role_name','')}")
-        info.setStyleSheet("color:#555;font-size:11px;padding:8px 0;")
+        info.setStyleSheet(f"color:{COLOR_TEXT_DIM};font-size:11px;padding:8px 0;")
         sl.addWidget(info)
 
         out = QPushButton("  ⬅ Выйти"); out.setObjectName("nav"); out.setFixedHeight(38)
         out.clicked.connect(self._do_logout); sl.addWidget(out)
 
         lay.addWidget(sb)
+
         content = QWidget(); cl = QVBoxLayout(content); cl.setContentsMargins(20,16,20,16)
         cl.addWidget(self.stack); lay.addWidget(content)
 
-        if self._btns:
+        if self._btns and self._tables:
             self._btns[0].setChecked(True)
-            self._switch(0, tables[0])
+            self._switch(0, self._tables[0])
 
     def _switch(self, idx, table):
         for i, b in enumerate(self._btns): b.setChecked(i == idx)
         old = self.stack.widget(idx)
-        if not isinstance(old, TableEditor):
-            new = TableEditor(table)
+        WidgetClass = TableEditor if self._use_editor else TableViewer
+        if not isinstance(old, WidgetClass):
+            new = WidgetClass(table)
             self.stack.removeWidget(old); old.deleteLater()
             self.stack.insertWidget(idx, new)
         self.stack.setCurrentIndex(idx)
@@ -589,108 +626,59 @@ class AdminWindow(QMainWindow):
 
 
 # ════════════════════════════════════════════════════════
-#  ПАНЕЛЬ ГОСТЯ — только чтение разрешённых таблиц
+#  ПАНЕЛЬ АДМИНИСТРАТОРА — все таблицы, полный CRUD
 # ════════════════════════════════════════════════════════
-# Удали этот класс вместе с блоком GUEST_START/GUEST_END если не нужен
-# GUEST_START
-class GuestWindow(QMainWindow):
-    logout = Signal()
-
+class AdminWindow(BaseWindow):
     def __init__(self, user):
-        super().__init__()
-        self.user = user
-        self.setWindowTitle("Просмотр каталога — Гость")
-        self.resize(1000, 640); self.setStyleSheet(STYLE)
-        self._build()
-
-    def _build(self):
-        root = QWidget(); self.setCentralWidget(root)
-        lay = QHBoxLayout(root); lay.setContentsMargins(0,0,0,0); lay.setSpacing(0)
-
-        # Sidebar
-        sb = QFrame(); sb.setObjectName("sidebar"); sb.setFixedWidth(200)
-        sl = QVBoxLayout(sb); sl.setContentsMargins(0,0,0,0); sl.setSpacing(0)
-
-        header = QLabel("  Каталог")
-        header.setStyleSheet("color:#e94560;font-size:14px;font-weight:bold;padding:18px 0 6px 0;")
-        sl.addWidget(header)
-
-        # Бейджик «Гость»
-        badge_wrap = QWidget()
-        bw = QHBoxLayout(badge_wrap); bw.setContentsMargins(10,0,10,8)
-        badge = QLabel("👁  Только просмотр"); badge.setObjectName("guest_badge")
-        bw.addWidget(badge)
-        sl.addWidget(badge_wrap)
-
-        sep = QFrame(); sep.setFixedHeight(1); sep.setStyleSheet("background:#0f3460;")
-        sl.addWidget(sep)
-
-        self.stack = QStackedWidget()
-        self._btns = []
-
-        # Показываем только разрешённые таблицы
-        tables = [t for t in GUEST_VISIBLE_TABLES if t in DB.tables()]
-
-        for i, tbl in enumerate(tables):
-            btn = QPushButton(f"  {tbl}")
-            btn.setObjectName("nav"); btn.setCheckable(True); btn.setFixedHeight(40)
-            btn.clicked.connect(lambda _, idx=i, t=tbl: self._switch(idx, t))
-            sl.addWidget(btn); self._btns.append(btn)
-            self.stack.addWidget(QWidget())
-
-        sl.addStretch()
-        sep2 = QFrame(); sep2.setFixedHeight(1); sep2.setStyleSheet("background:#0f3460;")
-        sl.addWidget(sep2)
-
-        out = QPushButton("  ⬅ Выйти"); out.setObjectName("nav"); out.setFixedHeight(38)
-        out.clicked.connect(self._do_logout); sl.addWidget(out)
-
-        lay.addWidget(sb)
-        content = QWidget(); cl = QVBoxLayout(content); cl.setContentsMargins(20,16,20,16)
-        cl.addWidget(self.stack); lay.addWidget(content)
-
-        if self._btns and tables:
-            self._btns[0].setChecked(True)
-            self._switch(0, tables[0])
-
-    def _switch(self, idx, table):
-        for i, b in enumerate(self._btns): b.setChecked(i == idx)
-        old = self.stack.widget(idx)
-        if not isinstance(old, TableViewer):
-            new = TableViewer(table)
-            self.stack.removeWidget(old); old.deleteLater()
-            self.stack.insertWidget(idx, new)
-        self.stack.setCurrentIndex(idx)
-
-    def _do_logout(self):
-        self.logout.emit(); self.close()
-# GUEST_END
+        tables = DB.tables()
+        super().__init__(
+            title="Панель администратора",
+            user=user,
+            tables=tables,
+            editor=True,          # <-- True = кнопки добавить/изменить/удалить
+            badge_text=None,      # <-- у админа нет бейджика
+        )
 
 
 # ════════════════════════════════════════════════════════
-#  ПАНЕЛЬ ПОЛЬЗОВАТЕЛЯ
+#  ПАНЕЛЬ ПОЛЬЗОВАТЕЛЯ — только видимые таблицы, только просмотр
+#
+#  Чтобы изменить какие таблицы видит пользователь —
+#  меняй список USER_VISIBLE_TABLES вверху файла
 # ════════════════════════════════════════════════════════
-class UserWindow(QMainWindow):
-    logout = Signal()
-
+class UserWindow(BaseWindow):
     def __init__(self, user):
-        super().__init__()
-        self.setWindowTitle("Личный кабинет")
-        self.resize(700, 400); self.setStyleSheet(STYLE)
-        root = QWidget(); self.setCentralWidget(root)
-        lay = QVBoxLayout(root); lay.setAlignment(Qt.AlignmentFlag.AlignCenter); lay.setSpacing(14)
+        all_tables = DB.tables()
+        # Показываем только таблицы из USER_VISIBLE_TABLES которые реально есть в БД
+        tables = [t for t in USER_VISIBLE_TABLES if t in all_tables]
+        super().__init__(
+            title="Личный кабинет",
+            user=user,
+            tables=tables,
+            editor=False,                    # <-- False = только просмотр, без редактирования
+            badge_text="👤  Личный кабинет", # <-- бейджик в сайдбаре
+            badge_obj="user_badge",
+        )
 
-        lbl = QLabel(f"Добро пожаловать,\n{user.get('full_name', user.get('login',''))}")
-        lbl.setObjectName("title"); lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lay.addWidget(lbl)
 
-        hint = QLabel("Здесь будет интерфейс пользователя.\nДобавьте нужные виджеты.")
-        hint.setObjectName("sub"); hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lay.addWidget(hint)
-
-        btn = QPushButton("Выйти"); btn.setObjectName("secondary"); btn.setFixedWidth(140)
-        btn.clicked.connect(lambda: (self.logout.emit(), self.close()))
-        lay.addWidget(btn, alignment=Qt.AlignmentFlag.AlignCenter)
+# ════════════════════════════════════════════════════════
+#  ПАНЕЛЬ ГОСТЯ — только разрешённые таблицы, только просмотр
+#
+#  Чтобы изменить какие таблицы видит гость —
+#  меняй список GUEST_VISIBLE_TABLES вверху файла
+# ════════════════════════════════════════════════════════
+class GuestWindow(BaseWindow):
+    def __init__(self, user):
+        all_tables = DB.tables()
+        tables = [t for t in GUEST_VISIBLE_TABLES if t in all_tables]
+        super().__init__(
+            title="Просмотр каталога — Гость",
+            user=user,
+            tables=tables,
+            editor=False,                        # <-- False = только просмотр
+            badge_text="👁  Только просмотр",   # <-- бейджик в сайдбаре
+            badge_obj="guest_badge",
+        )
 
 
 # ════════════════════════════════════════════════════════
@@ -705,7 +693,7 @@ def main():
     except Exception as e:
         QMessageBox.critical(None, "Ошибка подключения",
             f"Не удалось подключиться к БД:\n\n{e}\n\n"
-            "Проверьте параметры в начале файла app.py")
+            "Проверьте параметры в начале файла.")
         sys.exit(1)
 
     auth = AuthWindow()
@@ -716,11 +704,10 @@ def main():
 
         if role == ROLE_ADMIN:
             win = AdminWindow(user)
-        # GUEST_START
         elif role == ROLE_GUEST:
             win = GuestWindow(user)
-        # GUEST_END
         else:
+            # client и любая другая роль → UserWindow
             win = UserWindow(user)
 
         win.logout.connect(lambda: auth.show())
